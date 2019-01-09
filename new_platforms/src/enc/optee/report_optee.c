@@ -40,7 +40,7 @@ oe_result_t oe_verify_report(
     oe_result_t result = OE_OK;
 
     mbedtls_x509_crt chain = {0};
-    mbedtls_x509_crt local_chain = {0};
+    mbedtls_x509_crt other_chain = {0};
 
     mbedtls_x509_crt_init(&chain);
     int res = mbedtls_x509_crt_parse(&chain, report, report_size);
@@ -59,23 +59,33 @@ oe_result_t oe_verify_report(
     }
 
     // validate the chain is properly rooted
-    {
-        mbedtls_x509_crt* root = &chain;
-        while (root->next)
-            root = root->next;
+    mbedtls_x509_crt* root = &chain;
+    while (root->next)
+        root = root->next;
 
-        uint32_t validation_flags = 0;
-        res = mbedtls_x509_crt_verify(
-            &chain, root, NULL, NULL, &validation_flags, NULL, NULL);
-        if (res != 0 || validation_flags != 0)
-        {
-            result = OE_FAILURE;
-            goto Cleanup;
-        }
+    uint32_t validation_flags = 0;
+    res = mbedtls_x509_crt_verify(
+        &chain, root, NULL, NULL, &validation_flags, NULL, NULL);
+    if (res != 0 || validation_flags != 0)
+    {
+        result = OE_FAILURE;
+        goto Cleanup;
     }
 
     // validate the parent cert is matching
+    char** trusted_roots;
+    size_t trusted_roots_count;
+    result = get_remote_attestation_trusted_root(
+        &trusted_roots, &trusted_roots_count);
+    if (result != OE_OK)
     {
+        goto Cleanup;
+    }
+
+    if (trusted_roots_count == 0)
+    {
+        // perform local attestation
+
         uint8_t* local_report;
         size_t local_report_size;
         result = oe_get_report_v2(
@@ -85,30 +95,67 @@ oe_result_t oe_verify_report(
             goto Cleanup;
         }
 
-        mbedtls_x509_crt_init(&local_chain);
-        res = mbedtls_x509_crt_parse(&local_chain, local_report, report_size);
+        mbedtls_x509_crt_init(&other_chain);
+        res = mbedtls_x509_crt_parse(
+            &other_chain, local_report, local_report_size); // TODO make this change 
         if (res != 0)
         {
             result = OE_FAILURE;
             goto Cleanup;
         }
 
-        if (local_chain.next == NULL)
+        if (other_chain.next == NULL)
         {
             result = OE_FAILURE;
             goto Cleanup;
         }
 
-        if (memcmp(chain.next->raw.p, local_chain.next->raw.p, local_chain.next->raw.len))
+        if (memcmp(chain.next->raw.p, other_chain.next->raw.p, other_chain.next->raw.len))
         {
             result = OE_FAILURE;
             goto Cleanup;
         }
     }
+    else
+    {
+        bool found = FALSE;
+        for (int i = 0; i < trusted_roots_count; i++)
+        {
+            mbedtls_x509_crt_init(&other_chain);
+            res = mbedtls_x509_crt_parse(
+                &other_chain, trusted_roots[i], strlen(trusted_roots[i]) + 1); // make sure we have \0
+            if (res != 0)
+            {
+                result = OE_FAILURE;
+                goto Cleanup;
+            }
+
+            if (memcmp(
+                    root->raw.p,
+                    other_chain.raw.p,
+                    other_chain.raw.len) == 0)
+            {
+                found = TRUE;
+                break;
+            }
+
+            mbedtls_x509_crt_free(&other_chain);
+            memset(&other_chain, 0, sizeof(other_chain));
+        }
+        if (!found)
+        {
+            result = OE_FAILURE;
+            goto Cleanup;
+        }
+        if (parsed_report)
+        {
+            parsed_report->identity.attributes |= OE_REPORT_ATTRIBUTES_REMOTE;
+        }
+    }
 
 Cleanup:
     mbedtls_x509_crt_free(&chain);
-    mbedtls_x509_crt_free(&local_chain);
+    mbedtls_x509_crt_free(&other_chain);
 
     return result;
 }

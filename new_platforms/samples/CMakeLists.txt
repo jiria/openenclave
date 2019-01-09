@@ -8,4 +8,5 @@ add_subdirectory(sockets)
 # ARM TrustZone.
 if(TZ)
     add_subdirectory(localattestation)
+    add_subdirectory(remoteattestation)
 endif()
