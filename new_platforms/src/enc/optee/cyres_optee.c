@@ -195,6 +195,40 @@ oe_result_t get_cyres_cert_chain(uint8_t** pem, size_t* pem_size)
     return OE_OK;
 }
 
+static char* policy_trusted_root[1] = { NULL };
+
+oe_result_t set_remote_attestation_trusted_root(char** trusted_roots, size_t trusted_root_count)
+{
+    if (trusted_root_count != 1)
+    {
+        return OE_FAILURE;
+    }
+
+    if (policy_trusted_root[0] != NULL)
+    {
+        free(policy_trusted_root[0]);
+    }
+
+    const size_t trusted_root_size = strlen(trusted_roots[0]) + 1;
+    policy_trusted_root[0] = malloc(trusted_root_size);
+    if (policy_trusted_root[0] == NULL)
+    {
+        return OE_OUT_OF_MEMORY;
+    }
+
+    memcpy(policy_trusted_root[0], trusted_roots[0], trusted_root_size);
+
+    return OE_OK;
+}
+
+oe_result_t get_remote_attestation_trusted_root(char*** trusted_roots, size_t* trusted_root_count)
+{
+    *trusted_root_count = policy_trusted_root[0] == NULL ? 0 : 1;
+    *trusted_roots = policy_trusted_root;
+    
+    return OE_OK;
+}
+
 #ifdef DISABLE /* Disable file export for now. Not used by OE */
 oe_result_t ExportCyresCertChain(Tcps_ConstStringA exportFilePath)
 {

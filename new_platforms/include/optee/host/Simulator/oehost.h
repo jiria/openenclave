@@ -10,7 +10,9 @@
 /* We need to redefine CreaateFileW in order to simulate calls to it to
  * launch a TA in OP-TEE.
  */
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+
 #define CreateFileW Tcps_CreateFileW
 #define CloseHandle Tcps_CloseHandle
 
